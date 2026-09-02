@@ -12,6 +12,7 @@ import com.lamplitisles.herdrmobile.ssh.AndroidNsdDiscovery
 import com.lamplitisles.herdrmobile.ssh.ConnectOutcome
 import com.lamplitisles.herdrmobile.ssh.ConnectionTarget
 import com.lamplitisles.herdrmobile.ssh.DiscoveredTarget
+import com.lamplitisles.herdrmobile.ssh.DiscoveryContract
 import com.lamplitisles.herdrmobile.ssh.JschSshTransport
 import com.lamplitisles.herdrmobile.ssh.OpenSshKeyCodec
 import com.lamplitisles.herdrmobile.ssh.RemoteSessionController
@@ -22,6 +23,7 @@ import com.lamplitisles.herdrmobile.ssh.TargetValidation
 import com.lamplitisles.herdrmobile.ssh.TargetValidator
 import com.lamplitisles.herdrmobile.ssh.TerminalSize
 import com.lamplitisles.herdrmobile.ssh.TrustOutcome
+import com.lamplitisles.herdrmobile.ssh.toContract
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -78,12 +80,15 @@ class HerdrSshPlugin : Plugin() {
             return
         }
         getActivity().runOnUiThread {
-            discovery.discover { targets ->
-                call.resolve(JSObject().apply {
-                    val array = JSArray()
-                    targets.forEach { array.put(discoveredJson(it)) }
-                    put("targets", array)
-                })
+            discovery.discover { result ->
+                when (val response = result.toContract()) {
+                    is DiscoveryContract.Available -> call.resolve(JSObject().apply {
+                        val array = JSArray()
+                        response.targets.forEach { array.put(discoveredJson(it)) }
+                        put("targets", array)
+                    })
+                    is DiscoveryContract.Unavailable -> call.reject(response.message, response.code)
+                }
             }
         }
     }

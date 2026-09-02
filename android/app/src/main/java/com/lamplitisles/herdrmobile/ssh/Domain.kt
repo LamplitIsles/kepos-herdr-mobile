@@ -12,6 +12,21 @@ data class DiscoveredTarget(
     val port: Int
 )
 
+sealed interface DiscoveryResult {
+    data class Completed(val targets: List<DiscoveredTarget>) : DiscoveryResult
+    data class Failed(val code: String, val message: String) : DiscoveryResult
+}
+
+internal sealed interface DiscoveryContract {
+    data class Available(val targets: List<DiscoveredTarget>) : DiscoveryContract
+    data class Unavailable(val code: String, val message: String) : DiscoveryContract
+}
+
+internal fun DiscoveryResult.toContract(): DiscoveryContract = when (this) {
+    is DiscoveryResult.Completed -> DiscoveryContract.Available(targets)
+    is DiscoveryResult.Failed -> DiscoveryContract.Unavailable(code, message)
+}
+
 data class TerminalSize(
     val columns: Int,
     val rows: Int,
@@ -113,6 +128,6 @@ sealed interface SessionCommandOutcome {
 }
 
 interface TargetDiscovery {
-    fun discover(onComplete: (List<DiscoveredTarget>) -> Unit)
+    fun discover(onComplete: (DiscoveryResult) -> Unit)
     fun cancel()
 }

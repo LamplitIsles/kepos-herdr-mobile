@@ -128,12 +128,12 @@ private class JschSshConnection(
     private val callbacks: TerminalCallbacks
 ) : SshConnection {
     private val closed = AtomicBoolean(false)
-    private val reader: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, "herdr-terminal-reader").apply { isDaemon = true }
-    }
+    private val reader = JschTerminalReader(remoteOutput, callbacks, closed, onFinished = {
+        closeTransport(channel, session)
+    })
 
     init {
-        reader.execute(::readFrames)
+        reader.start()
     }
 
     override fun sendInput(data: ByteArray) {
@@ -154,6 +154,24 @@ private class JschSshConnection(
         closeTransport(channel, session)
         reader.shutdownNow()
     }
+}
+
+internal class JschTerminalReader(
+    private val remoteOutput: InputStream,
+    private val callbacks: TerminalCallbacks,
+    private val closed: AtomicBoolean,
+    private val onFinished: () -> Unit,
+    private val reader: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "herdr-terminal-reader").apply { isDaemon = true }
+    },
+) {
+    fun start() {
+        reader.execute(::readFrames)
+    }
+
+    fun shutdownNow() {
+        reader.shutdownNow()
+    }
 
     private fun readFrames() {
         val buffer = ByteArray(8192)
@@ -167,7 +185,11 @@ private class JschSshConnection(
         } catch (_: IOException) {
             if (closed.compareAndSet(false, true)) callbacks.onClosed("The SSH stream was interrupted.")
         } finally {
-            closeTransport(channel, session)
+            try {
+                onFinished()
+            } finally {
+                reader.shutdownNow()
+            }
         }
     }
 }
