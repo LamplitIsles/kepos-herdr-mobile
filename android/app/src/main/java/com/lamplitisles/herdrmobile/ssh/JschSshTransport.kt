@@ -58,23 +58,30 @@ class JschSshTransport(
                 observed != null && expectedFingerprint != observed -> TransportResult.FingerprintMismatch(expectedFingerprint ?: "", observed)
                 else -> TransportResult.Failed("connection-failed", "Could not connect to the SSH host.")
             }
-            channel?.disconnect()
-            session?.disconnect()
+            closeTransport(channel, session)
             return result
         } catch (_: IOException) {
-            channel?.disconnect()
-            session?.disconnect()
+            closeTransport(channel, session)
             return TransportResult.Failed("connection-failed", "Could not connect to the SSH host.")
         } catch (_: Exception) {
-            channel?.disconnect()
-            session?.disconnect()
+            closeTransport(channel, session)
             return TransportResult.Failed("connection-failed", "Could not connect to the SSH host.")
         }
     }
 
     private fun failAndClose(session: com.jcraft.jsch.Session, code: String, message: String): TransportResult.Failed {
-        session.disconnect()
+        closeTransport(null, session)
         return TransportResult.Failed(code, message)
+    }
+}
+
+private fun closeTransport(channel: ChannelShell?, session: com.jcraft.jsch.Session?) {
+    try {
+        channel?.disconnect()
+    } catch (_: Exception) {
+        // Always attempt to close the parent session as well.
+    } finally {
+        try { session?.disconnect() } catch (_: Exception) { }
     }
 }
 
@@ -144,10 +151,8 @@ private class JschSshConnection(
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
-        try { channel.disconnect() } finally {
-            session.disconnect()
-            reader.shutdownNow()
-        }
+        closeTransport(channel, session)
+        reader.shutdownNow()
     }
 
     private fun readFrames() {
@@ -162,8 +167,7 @@ private class JschSshConnection(
         } catch (_: IOException) {
             if (closed.compareAndSet(false, true)) callbacks.onClosed("The SSH stream was interrupted.")
         } finally {
-            try { channel.disconnect() } catch (_: Exception) { }
-            try { session.disconnect() } catch (_: Exception) { }
+            closeTransport(channel, session)
         }
     }
 }

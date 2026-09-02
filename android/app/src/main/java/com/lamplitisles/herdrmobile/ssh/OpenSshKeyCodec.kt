@@ -19,6 +19,17 @@ object OpenSshKeyCodec {
     fun rsaPublicKeyText(publicKey: RSAPublicKey): String =
         "ssh-rsa ${base64(rsaPublicKeyBlob(publicKey))} herdr-device-key"
 
+    /** SSH signature wire value: string algorithm + string raw signature. */
+    fun sshSignatureBlob(algorithm: String, rawSignature: ByteArray): ByteArray {
+        require(algorithm == "rsa-sha2-256" || algorithm == "rsa-sha2-512") {
+            "Unsupported RSA signature algorithm"
+        }
+        val out = ByteArrayOutputStream()
+        putString(out, algorithm.toByteArray(Charsets.US_ASCII))
+        putString(out, rawSignature)
+        return out.toByteArray()
+    }
+
     fun sha256Fingerprint(keyBlob: ByteArray): String {
         val digest = MessageDigest.getInstance("SHA-256").digest(keyBlob)
         return "SHA256:${base64(digest).trimEnd('=')}"

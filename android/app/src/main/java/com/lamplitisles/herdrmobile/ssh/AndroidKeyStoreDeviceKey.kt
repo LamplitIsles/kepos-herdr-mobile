@@ -3,7 +3,6 @@ package com.lamplitisles.herdrmobile.ssh
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import com.jcraft.jsch.Identity
-import com.jcraft.jsch.JSchException
 import java.security.GeneralSecurityException
 import java.security.KeyPairGenerator
 import java.security.KeyStore
@@ -53,11 +52,12 @@ class AndroidKeyStoreDeviceKey(
 
     override fun getPublicKeyBlob(): ByteArray = publicBlob
 
-    override fun getSignature(data: ByteArray): ByteArray = sign(data, "rsa-sha2-512")
+    override fun getSignature(data: ByteArray): ByteArray = getSignature(data, "rsa-sha2-512")
 
-    override fun getSignature(data: ByteArray, alg: String): ByteArray = sign(data, alg)
+    override fun getSignature(data: ByteArray, alg: String): ByteArray =
+        OpenSshKeyCodec.sshSignatureBlob(alg, sign(data, alg))
 
-    override fun getAlgName(): String = "RSA"
+    override fun getAlgName(): String = "ssh-rsa"
 
     override fun getName(): String = ALIAS
 
