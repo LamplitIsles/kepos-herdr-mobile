@@ -56,6 +56,7 @@ export class HerdrMvpController {
   private sessionHandle: { remove: () => Promise<void> } | null = null;
   private connecting = false;
   private pendingFrames = new Map<string, string>();
+  private frameDecoders = new Map<string, TextDecoder>();
 
   constructor(private readonly plugin: HerdrSshPlugin) {}
 
@@ -152,6 +153,7 @@ export class HerdrMvpController {
       return result;
     } catch (error) {
       this.pendingFrames.clear();
+      this.frameDecoders.clear();
       this.setState({ error: readableError(error, "Could not reach this host") });
       return null;
     } finally {
@@ -166,12 +168,15 @@ export class HerdrMvpController {
       this.setState({ phase: "terminal", activeSessionId: result.sessionId, terminalText: initialFrame, error: null, trustPrompt: null, notice: null });
     } else if (result.status === "trust-required") {
       this.pendingFrames.clear();
+      this.frameDecoders.clear();
       this.setState({ phase: "ready", trustPrompt: { fingerprint: result.fingerprint, kind: "first-use" }, error: null });
     } else if (result.status === "fingerprint-mismatch") {
       this.pendingFrames.clear();
+      this.frameDecoders.clear();
       this.setState({ phase: "ready", trustPrompt: { fingerprint: result.observedFingerprint, expectedFingerprint: result.expectedFingerprint, kind: "changed" }, error: "The server fingerprint changed. Verify the host before replacing its trust record." });
     } else {
       this.pendingFrames.clear();
+      this.frameDecoders.clear();
       this.setState({ phase: "ready", error: result.message, trustPrompt: null });
     }
   }
@@ -213,7 +218,10 @@ export class HerdrMvpController {
     const sessionId = this.current.activeSessionId;
     if (!sessionId) return;
     try { await this.plugin.release({ sessionId }); }
-    finally { this.setState({ phase: "ready", activeSessionId: null, notice: "Session disconnected" }); }
+    finally {
+      this.appendTerminalText(this.flushFrameDecoder(sessionId));
+      this.setState({ phase: "ready", activeSessionId: null, notice: "Session disconnected" });
+    }
   }
 
   async dispose(): Promise<void> {
@@ -225,24 +233,45 @@ export class HerdrMvpController {
   }
 
   private onTerminalFrame(frame: TerminalFrame): void {
+    const isActiveSession = frame.sessionId === this.current.activeSessionId;
+    const isPendingSession = this.connecting && this.current.activeSessionId === null;
+    if (!isActiveSession && !isPendingSession) return;
+
     let decoded: string;
-    try { decoded = decodeBase64(frame.data); }
+    try { decoded = this.decodeTerminalFrame(frame); }
     catch {
       this.setState({ error: "Received unreadable terminal data" });
       return;
     }
-    if (frame.sessionId === this.current.activeSessionId) {
-      this.setState({ terminalText: this.current.terminalText + decoded });
+    if (isActiveSession) {
+      this.appendTerminalText(decoded);
       return;
     }
-    if (this.connecting && this.current.activeSessionId === null) {
+    if (isPendingSession) {
       this.pendingFrames.set(frame.sessionId, (this.pendingFrames.get(frame.sessionId) ?? "") + decoded);
     }
   }
 
   private onSessionState(event: SessionStateEvent): void {
     if (event.sessionId !== this.current.activeSessionId) return;
+    this.appendTerminalText(this.flushFrameDecoder(event.sessionId));
     this.setState({ phase: "ready", activeSessionId: null, notice: "Session disconnected", error: event.reason && event.reason !== "released" ? event.reason : null });
+  }
+
+  private decodeTerminalFrame(frame: TerminalFrame): string {
+    const decoder = this.frameDecoders.get(frame.sessionId) ?? new TextDecoder();
+    this.frameDecoders.set(frame.sessionId, decoder);
+    return decoder.decode(decodeBase64(frame.data), { stream: true });
+  }
+
+  private flushFrameDecoder(sessionId: string): string {
+    const decoder = this.frameDecoders.get(sessionId);
+    this.frameDecoders.delete(sessionId);
+    return decoder?.decode() ?? "";
+  }
+
+  private appendTerminalText(text: string): void {
+    if (text) this.setState({ terminalText: this.current.terminalText + text });
   }
 }
 
@@ -254,7 +283,7 @@ export function readableError(error: unknown, fallback: string): string {
   return fallback;
 }
 
-function decodeBase64(value: string): string {
+function decodeBase64(value: string): Uint8Array {
   const binary = globalThis.atob(value);
-  return new TextDecoder().decode(Uint8Array.from(binary, (char) => char.charCodeAt(0)));
+  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
 }

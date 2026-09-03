@@ -163,6 +163,20 @@ describe("HerdrMvpController one-target route", () => {
     expect(controller.state.terminalText).toBe("herdr");
   });
 
+  it("preserves a UTF-8 character split across terminal frames", async () => {
+    const plugin = new FakePlugin();
+    plugin.connectResults = [{ status: "connected", sessionId: "session-1", fingerprint: "SHA256:first" }];
+    const controller = new HerdrMvpController(plugin);
+    await controller.load();
+    await controller.connect();
+
+    const bytes = new TextEncoder().encode("你");
+    plugin.emitFrame(base64(bytes.slice(0, 2)));
+    plugin.emitFrame(base64(bytes.slice(2)));
+
+    expect(controller.state.terminalText).toBe("你");
+  });
+
   it("releases an active session and ignores stale frames", async () => {
     const plugin = new FakePlugin();
     plugin.connectResults = [{ status: "connected", sessionId: "session-1", fingerprint: "SHA256:first" }];
@@ -177,3 +191,7 @@ describe("HerdrMvpController one-target route", () => {
     expect(controller.state.terminalText).toBe("");
   });
 });
+
+function base64(bytes: Uint8Array): string {
+  return globalThis.btoa(String.fromCharCode(...bytes));
+}
