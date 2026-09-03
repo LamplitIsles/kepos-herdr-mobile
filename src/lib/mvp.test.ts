@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { HerdrMvpController } from "./mvp";
+import { PORTRAIT_INITIAL_ROWS, PORTRAIT_MAX_COLUMNS } from "./terminal-size";
 import type {
   ConnectResult,
   ConnectionTarget,
@@ -22,6 +23,9 @@ class FakePlugin implements HerdrSshPlugin {
   sent: string[] = [];
   resized: Array<{ columns: number; rows: number }> = [];
   released: string[] = [];
+  activated: string[] = [];
+  connectOptions: Array<{ columns: number; rows: number }> = [];
+  beforeConnectResult: (() => void) | undefined;
   private frameListeners = new Set<(event: TerminalFrame) => void>();
   private stateListeners = new Set<(event: SessionStateEvent) => void>();
 
@@ -29,9 +33,14 @@ class FakePlugin implements HerdrSshPlugin {
   getTarget(): Promise<{ target?: ConnectionTarget }> { return Promise.resolve({ target: this.savedTarget }); }
   saveTarget(next: ConnectionTarget): Promise<{ target: ConnectionTarget }> { this.savedTarget = next; return Promise.resolve({ target: next }); }
   discoverTargets(): Promise<{ targets: DiscoveredTarget[] }> { return Promise.resolve({ targets: this.discoveries }); }
-  connect(): Promise<ConnectResult> { return Promise.resolve(this.connectResults.shift() ?? { status: "failed", code: "test", message: "test failure" }); }
+  connect(options: { columns: number; rows: number }): Promise<ConnectResult> {
+    this.connectOptions.push(options);
+    this.beforeConnectResult?.();
+    return Promise.resolve(this.connectResults.shift() ?? { status: "failed", code: "test", message: "test failure" });
+  }
   confirmHostTrust(value: { fingerprint: string }): Promise<{ status: "accepted"; fingerprint: string }> { this.confirmed.push(value.fingerprint); return Promise.resolve({ status: "accepted", ...value }); }
   replaceHostTrust(value: { fingerprint: string }): Promise<{ status: "replaced"; fingerprint: string }> { this.replaced.push(value.fingerprint); return Promise.resolve({ status: "replaced", ...value }); }
+  activate({ sessionId }: { sessionId: string }): Promise<void> { this.activated.push(sessionId); return Promise.resolve(); }
   sendInput({ data }: { sessionId: string; data: string }): Promise<void> { this.sent.push(data); return Promise.resolve(); }
   resize(value: { sessionId: string; columns: number; rows: number }): Promise<void> { this.resized.push(value); return Promise.resolve(); }
   release({ sessionId }: { sessionId: string }): Promise<void> { this.released.push(sessionId); return Promise.resolve(); }
@@ -94,12 +103,14 @@ describe("HerdrMvpController one-target route", () => {
 
     await controller.connect();
     expect(controller.state.trustPrompt).toEqual({ kind: "first-use", fingerprint: "SHA256:first" });
+    expect(plugin.connectOptions).toEqual([{ columns: PORTRAIT_MAX_COLUMNS, rows: PORTRAIT_INITIAL_ROWS }]);
     expect(controller.state.activeSessionId).toBeNull();
 
     await controller.confirmTrust();
     expect(plugin.confirmed).toEqual(["SHA256:first"]);
     expect(controller.state.activeSessionId).toBe("session-1");
     expect(controller.state.phase).toBe("terminal");
+    expect(controller.state.notice).toBeNull();
   });
 
   it("surfaces a changed fingerprint and uses a separate replacement action", async () => {
@@ -126,6 +137,7 @@ describe("HerdrMvpController one-target route", () => {
     await controller.connect();
 
     await controller.sendInput("ls\n");
+    expect(plugin.activated).toEqual(["session-1"]);
     await controller.resize(100, 30);
     plugin.emitFrame("aGVyZHI=", "session-1");
     expect(plugin.sent).toEqual(["ls\n"]);
@@ -136,6 +148,19 @@ describe("HerdrMvpController one-target route", () => {
     expect(controller.state.activeSessionId).toBeNull();
     expect(controller.state.phase).toBe("ready");
     expect(controller.state.error).toBe("Mac closed the session");
+  });
+
+  it("replays terminal frames received before connect resolves", async () => {
+    const plugin = new FakePlugin();
+    plugin.connectResults = [{ status: "connected", sessionId: "session-early", fingerprint: "SHA256:first" }];
+    const controller = new HerdrMvpController(plugin);
+    await controller.load();
+    plugin.beforeConnectResult = () => plugin.emitFrame("aGVyZHI=", "session-early");
+
+    await controller.connect();
+
+    expect(controller.state.activeSessionId).toBe("session-early");
+    expect(controller.state.terminalText).toBe("herdr");
   });
 
   it("releases an active session and ignores stale frames", async () => {

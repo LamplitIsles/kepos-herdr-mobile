@@ -7,6 +7,7 @@ import type {
   SessionStateEvent,
   TerminalFrame
 } from "./plugin";
+import { PORTRAIT_INITIAL_ROWS, PORTRAIT_MAX_COLUMNS } from "./terminal-size";
 
 export type UiPhase = "loading" | "setup" | "ready" | "terminal";
 export type DiscoveryState = "idle" | "searching" | "complete" | "unavailable";
@@ -53,6 +54,8 @@ export class HerdrMvpController {
   private listeners = new Set<StateListener>();
   private frameHandle: { remove: () => Promise<void> } | null = null;
   private sessionHandle: { remove: () => Promise<void> } | null = null;
+  private connecting = false;
+  private pendingFrames = new Map<string, string>();
 
   constructor(private readonly plugin: HerdrSshPlugin) {}
 
@@ -132,24 +135,43 @@ export class HerdrMvpController {
       return null;
     }
     this.setState({ error: null, notice: null, trustPrompt: null });
+    this.connecting = true;
     try {
-      const result = await this.plugin.connect({ columns: 80, rows: 24 });
+      // Herdr decides between desktop and phone layouts from the initial PTY
+      // dimensions, before xterm has mounted and can report its fitted size.
+      const result = await this.plugin.connect({
+        columns: PORTRAIT_MAX_COLUMNS,
+        rows: PORTRAIT_INITIAL_ROWS
+      });
       this.applyConnectResult(result);
+      if (result.status === "connected") {
+        // Let Svelte mount xterm before Herdr paints its full-screen first frame.
+        await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 0));
+        await this.plugin.activate({ sessionId: result.sessionId });
+      }
       return result;
     } catch (error) {
+      this.pendingFrames.clear();
       this.setState({ error: readableError(error, "Could not reach this host") });
       return null;
+    } finally {
+      this.connecting = false;
     }
   }
 
   private applyConnectResult(result: ConnectResult): void {
     if (result.status === "connected") {
-      this.setState({ phase: "terminal", activeSessionId: result.sessionId, terminalText: "", error: null, trustPrompt: null, notice: "Connected · herdr is starting" });
+      const initialFrame = this.pendingFrames.get(result.sessionId) ?? "";
+      this.pendingFrames.clear();
+      this.setState({ phase: "terminal", activeSessionId: result.sessionId, terminalText: initialFrame, error: null, trustPrompt: null, notice: null });
     } else if (result.status === "trust-required") {
+      this.pendingFrames.clear();
       this.setState({ phase: "ready", trustPrompt: { fingerprint: result.fingerprint, kind: "first-use" }, error: null });
     } else if (result.status === "fingerprint-mismatch") {
+      this.pendingFrames.clear();
       this.setState({ phase: "ready", trustPrompt: { fingerprint: result.observedFingerprint, expectedFingerprint: result.expectedFingerprint, kind: "changed" }, error: "The server fingerprint changed. Verify the host before replacing its trust record." });
     } else {
+      this.pendingFrames.clear();
       this.setState({ phase: "ready", error: result.message, trustPrompt: null });
     }
   }
@@ -203,9 +225,19 @@ export class HerdrMvpController {
   }
 
   private onTerminalFrame(frame: TerminalFrame): void {
-    if (frame.sessionId !== this.current.activeSessionId) return;
-    try { this.setState({ terminalText: this.current.terminalText + decodeBase64(frame.data) }); }
-    catch { this.setState({ error: "Received unreadable terminal data" }); }
+    let decoded: string;
+    try { decoded = decodeBase64(frame.data); }
+    catch {
+      this.setState({ error: "Received unreadable terminal data" });
+      return;
+    }
+    if (frame.sessionId === this.current.activeSessionId) {
+      this.setState({ terminalText: this.current.terminalText + decoded });
+      return;
+    }
+    if (this.connecting && this.current.activeSessionId === null) {
+      this.pendingFrames.set(frame.sessionId, (this.pendingFrames.get(frame.sessionId) ?? "") + decoded);
+    }
   }
 
   private onSessionState(event: SessionStateEvent): void {

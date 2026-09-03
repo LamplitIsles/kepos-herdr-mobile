@@ -82,6 +82,19 @@ class RemoteSessionController(
     fun replaceHostTrust(fingerprint: String): TrustOutcome = savePendingTrust(fingerprint, replacing = true)
 
     @Synchronized
+    fun activate(sessionId: String): SessionCommandOutcome {
+        val current = active ?: return SessionCommandOutcome.Failed("not-connected", "The terminal is disconnected.")
+        if (current.id != sessionId) return SessionCommandOutcome.Failed("stale-session", "That terminal session is no longer active.")
+        return try {
+            current.connection.start()
+            SessionCommandOutcome.Accepted
+        } catch (_: Exception) {
+            releaseLocked(sessionId)
+            SessionCommandOutcome.Failed("start-failed", "The terminal could not be started.")
+        }
+    }
+
+    @Synchronized
     fun sendInput(sessionId: String, data: ByteArray): SessionCommandOutcome {
         val current = active ?: return SessionCommandOutcome.Failed("not-connected", "The terminal is disconnected.")
         if (current.id != sessionId) return SessionCommandOutcome.Failed("stale-session", "That terminal session is no longer active.")

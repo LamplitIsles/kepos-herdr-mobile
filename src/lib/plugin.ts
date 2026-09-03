@@ -53,6 +53,7 @@ export interface HerdrSshPlugin {
   }): Promise<ConnectResult>;
   confirmHostTrust(options: { fingerprint: string }): Promise<TrustResult>;
   replaceHostTrust(options: { fingerprint: string }): Promise<TrustResult>;
+  activate(options: { sessionId: string }): Promise<void>;
   sendInput(options: { sessionId: string; data: string }): Promise<void>;
   resize(options: {
     sessionId: string;

@@ -88,6 +88,22 @@ class RemoteSessionControllerTest {
     }
 
     @Test
+    fun terminalFramesBeginOnlyAfterTheSessionIsActive() {
+        val fixture = Fixture()
+        fixture.trust.save("SHA256:known")
+        fixture.transport.next = TransportResult.Connected(
+            FakeConnection { fixture.transport.callbacks?.onFrame("ready".toByteArray()) },
+            "SHA256:known"
+        )
+
+        val connected = fixture.controller.connect(TerminalSize(80, 24)) as ConnectOutcome.Connected
+        assertNull(fixture.events.frame)
+        fixture.controller.activate(connected.sessionId)
+
+        assertEquals("ready", fixture.events.frame?.toString(Charsets.UTF_8))
+    }
+
+    @Test
     fun secondConnectionIsRejectedUntilTheForegroundSessionIsReleased() {
         val fixture = Fixture()
         fixture.trust.save("SHA256:known")
@@ -141,17 +157,20 @@ class RemoteSessionControllerTest {
         var next: TransportResult = TransportResult.Failed("test", "test")
         var identity: DeviceKeyIdentity? = null
         var expectedFingerprint: String? = null
+        var callbacks: TerminalCallbacks? = null
         override fun connect(target: ConnectionTarget, identity: DeviceKeyIdentity, expectedFingerprint: String?, size: TerminalSize, callbacks: TerminalCallbacks): TransportResult {
             this.identity = identity
             this.expectedFingerprint = expectedFingerprint
+            this.callbacks = callbacks
             return next
         }
     }
 
-    private class FakeConnection : SshConnection {
+    private class FakeConnection(private val onStart: (() -> Unit)? = null) : SshConnection {
         val input = java.io.ByteArrayOutputStream()
         var lastSize: TerminalSize? = null
         var closed = false
+        override fun start() { onStart?.invoke() }
         override fun sendInput(data: ByteArray) { input.write(data) }
         override fun resize(size: TerminalSize) { lastSize = size }
         override fun close() { closed = true }
@@ -159,7 +178,8 @@ class RemoteSessionControllerTest {
 
     private class FakeEvents : SessionEventSink {
         var closedReason: String? = null
-        override fun onFrame(sessionId: String, data: ByteArray) = Unit
+        var frame: ByteArray? = null
+        override fun onFrame(sessionId: String, data: ByteArray) { frame = data }
         override fun onClosed(sessionId: String, reason: String?) { closedReason = reason }
     }
 }

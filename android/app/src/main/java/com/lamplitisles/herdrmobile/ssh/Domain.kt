@@ -82,6 +82,8 @@ interface TerminalCallbacks {
 }
 
 interface SshConnection {
+    /** Begin delivering remote terminal frames after the controller owns this session. */
+    fun start() = Unit
     fun sendInput(data: ByteArray)
     fun resize(size: TerminalSize)
     fun close()

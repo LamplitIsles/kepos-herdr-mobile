@@ -45,8 +45,6 @@ class JschSshTransport(
             val remoteOutput = channel.inputStream
             val localInput = channel.outputStream
             channel.connect(connectTimeoutMs)
-            localInput.write("herdr\n".toByteArray(Charsets.UTF_8))
-            localInput.flush()
             return TransportResult.Connected(
                 JschSshConnection(session, channel, remoteOutput, localInput, callbacks),
                 hostKeys.observedFingerprint ?: ""
@@ -128,11 +126,15 @@ private class JschSshConnection(
     private val callbacks: TerminalCallbacks
 ) : SshConnection {
     private val closed = AtomicBoolean(false)
+    private val started = AtomicBoolean(false)
     private val reader = JschTerminalReader(remoteOutput, callbacks, closed, onFinished = {
         closeTransport(channel, session)
     })
 
-    init {
+    override fun start() {
+        if (!started.compareAndSet(false, true)) return
+        localInput.write("herdr\n".toByteArray(Charsets.UTF_8))
+        localInput.flush()
         reader.start()
     }
 

@@ -40,13 +40,14 @@ the APK does not depend on a development server. The debug APK is written to
    IP manually when discovery is unavailable, then enter the Mac user and SSH
    port (normally 22). There is only one saved Connection Target; saving a
    changed host or port clears its old trust decision.
-4. Choose **Open Herdr**. On first contact, compare the displayed
+4. Choose the saved Host. On first contact, compare the displayed
    `SHA256:...` fingerprint with an independent check on the Mac, then choose
    **Trust & connect**. The Host Trust Record is persisted only after that
    action.
-5. The app opens one `xterm-256color` SSH PTY and writes `herdr`. Touch, scroll,
-   type, and resize inside the terminal. Leave the terminal or background/close
-   the app to release the native session.
+5. The app opens one `xterm-256color` SSH PTY and writes `herdr`. The active
+   terminal occupies the phone viewport; tap controls normally and drag
+   vertically to send Herdr mouse-wheel input. Leave the terminal or
+   background/close the app to release the native session.
 6. If a later connection reports a changed fingerprint, stop and verify the
    Mac. Only the explicit **Replace & connect** action can replace the Host
    Trust Record; there is no silent override.

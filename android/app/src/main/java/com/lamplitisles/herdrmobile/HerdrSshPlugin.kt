@@ -130,6 +130,16 @@ class HerdrSshPlugin : Plugin() {
     }
 
     @PluginMethod
+    fun activate(call: PluginCall) = runNative(call) {
+        val sessionId = call.getString("sessionId")
+        if (sessionId.isNullOrBlank()) {
+            call.reject("A live session is required.", "invalid-session")
+            return@runNative
+        }
+        commandResult(call, ensureController().activate(sessionId))
+    }
+
+    @PluginMethod
     fun sendInput(call: PluginCall) = runNative(call) {
         val sessionId = call.getString("sessionId")
         val data = call.getString("data")
